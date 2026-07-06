@@ -22,23 +22,44 @@ struct ImageEditorView: View {
     @State private var tileFraction: CGFloat = 0.02
     @State private var candidates: [CGRect] = []  // detected text, image pixel coords
     @State private var detecting = false
+    @State private var zoom: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @State private var pinchActive = false
+    @State private var pinchStart: (zoom: CGFloat, offset: CGPoint, centroid: CGPoint)?
+    @State private var dragCancelled = false  // a pinch interrupted this drag
 
     private let maxUndoSteps = 50
     private let handleHitRadius: CGFloat = 22
     private let minBoxSide: CGFloat = 10  // view points
+    private let maxZoom: CGFloat = 8
 
     var body: some View {
         VStack {
             GeometryReader { geo in
-                Image(uiImage: rendered ?? image)
-                    .resizable()
-                    .scaledToFit()
+                ZStack {
+                    Image(uiImage: rendered ?? image)
+                        .resizable()
+                        .frame(width: image.size.width * displayScale,
+                               height: image.size.height * displayScale)
+                        .position(x: image.size.width * displayScale / 2 + displayOffset.x,
+                                  y: image.size.height * displayScale / 2 + displayOffset.y)
+                }
                     .frame(width: geo.size.width, height: geo.size.height)
                     .overlay { decorations.allowsHitTesting(false) }
                     .overlay { removeButtons }
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .background {
+                        PinchGestureLayer(onChanged: pinchChanged, onEnded: pinchEnded)
+                    }
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
+                                if pinchActive {
+                                    cancelActiveDrag()
+                                    return
+                                }
+                                if dragCancelled { return }
                                 if dragStart == nil {
                                     dragStart = value.startLocation
                                     dragMode = hitTest(value.startLocation)
@@ -48,7 +69,7 @@ struct ImageEditorView: View {
                                     let p = clampToImage(imagePoint(fromView: value.location))
                                     rects[i] = CGRect(from: anchor, to: p)
                                 case .moving(let i, let original):
-                                    let scale = fitScale
+                                    let scale = displayScale
                                     rects[i] = original.offsetBy(
                                         dx: (value.location.x - value.startLocation.x) / scale,
                                         dy: (value.location.y - value.startLocation.y) / scale)
@@ -61,13 +82,15 @@ struct ImageEditorView: View {
                                     dragStart = nil
                                     dragMode = nil
                                     draftRect = nil
+                                    dragCancelled = false
                                 }
+                                guard !dragCancelled else { return }
                                 switch dragMode {
                                 case .moving(let i, let original),
                                      .resizing(let i, _, let original):
                                     let changed = rects[i]
-                                    let tooSmall = changed.width * fitScale < minBoxSide
-                                        || changed.height * fitScale < minBoxSide
+                                    let tooSmall = changed.width * displayScale < minBoxSide
+                                        || changed.height * displayScale < minBoxSide
                                     rects[i] = original  // commit() snapshots pre-edit state
                                     guard changed != original, !tooSmall else { return }
                                     var newRects = rects
@@ -188,13 +211,18 @@ struct ImageEditorView: View {
     @ViewBuilder private var removeButtons: some View {
         ForEach(rects.indices, id: \.self) { i in
             let rect = viewRect(from: rects[i])
-            Button { remove(i) } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 22))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, .black.opacity(0.6))
+            let position = CGPoint(x: rect.maxX + 16, y: rect.minY - 16)
+            // .clipped() hides but doesn't disable overflowing views — skip
+            // badges panned off screen so they can't be tapped invisibly
+            if CGRect(origin: .zero, size: containerSize).contains(position) {
+                Button { remove(i) } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .black.opacity(0.6))
+                }
+                .position(position)
             }
-            .position(x: rect.maxX + 16, y: rect.minY - 16)
         }
     }
 
@@ -226,29 +254,61 @@ struct ImageEditorView: View {
         return .drawing
     }
 
-    // MARK: - View <-> image coordinate mapping (aspect-fit letterboxing)
+    // MARK: - View <-> image coordinate mapping (aspect-fit + zoom/pan)
 
-    /// Points per image pixel when aspect-fit into the container
+    /// Points per image pixel when aspect-fit into the container (zoom 1)
     private var fitScale: CGFloat {
         min(containerSize.width / image.size.width,
             containerSize.height / image.size.height)
     }
 
-    private var fitOffset: CGPoint {
-        CGPoint(x: (containerSize.width - image.size.width * fitScale) / 2,
-                y: (containerSize.height - image.size.height * fitScale) / 2)
+    private var displayScale: CGFloat { fitScale * zoom }
+
+    /// View coordinate of image pixel (0,0). Pan is clamped so an axis the
+    /// image overflows never shows a gap; an axis it fits stays centered.
+    private var displayOffset: CGPoint {
+        CGPoint(x: offsetComponent(container: containerSize.width,
+                                   content: image.size.width * displayScale,
+                                   pan: pan.width),
+                y: offsetComponent(container: containerSize.height,
+                                   content: image.size.height * displayScale,
+                                   pan: pan.height))
+    }
+
+    private func offsetComponent(container: CGFloat, content: CGFloat,
+                                 pan: CGFloat) -> CGFloat {
+        let centered = (container - content) / 2
+        guard content > container else { return centered }
+        return min(0, max(container - content, centered + pan))
+    }
+
+    private func clampedPan(forOffset offset: CGPoint, zoom: CGFloat) -> CGSize {
+        let scale = fitScale * zoom
+        return CGSize(width: panComponent(container: containerSize.width,
+                                          content: image.size.width * scale,
+                                          offset: offset.x),
+                      height: panComponent(container: containerSize.height,
+                                           content: image.size.height * scale,
+                                           offset: offset.y))
+    }
+
+    private func panComponent(container: CGFloat, content: CGFloat,
+                              offset: CGFloat) -> CGFloat {
+        guard content > container else { return 0 }
+        let half = (content - container) / 2
+        return min(half, max(-half, offset - (container - content) / 2))
     }
 
     private func viewRect(from pixelRect: CGRect) -> CGRect {
-        CGRect(x: pixelRect.minX * fitScale + fitOffset.x,
-               y: pixelRect.minY * fitScale + fitOffset.y,
-               width: pixelRect.width * fitScale,
-               height: pixelRect.height * fitScale)
+        CGRect(x: pixelRect.minX * displayScale + displayOffset.x,
+               y: pixelRect.minY * displayScale + displayOffset.y,
+               width: pixelRect.width * displayScale,
+               height: pixelRect.height * displayScale)
     }
 
     private func imagePoint(fromView p: CGPoint) -> CGPoint {
-        CGPoint(x: (p.x - fitOffset.x) / fitScale,
-                y: (p.y - fitOffset.y) / fitScale)
+        CGPoint(x: (p.x - displayOffset.x) / displayScale,
+                y: (p.y - displayOffset.y) / displayScale)
     }
 
     private func clampToImage(_ p: CGPoint) -> CGPoint {
@@ -257,12 +317,47 @@ struct ImageEditorView: View {
     }
 
     private func imagePixelRect(from viewRect: CGRect) -> CGRect? {
-        let rect = CGRect(x: (viewRect.minX - fitOffset.x) / fitScale,
-                          y: (viewRect.minY - fitOffset.y) / fitScale,
-                          width: viewRect.width / fitScale,
-                          height: viewRect.height / fitScale)
+        let rect = CGRect(x: (viewRect.minX - displayOffset.x) / displayScale,
+                          y: (viewRect.minY - displayOffset.y) / displayScale,
+                          width: viewRect.width / displayScale,
+                          height: viewRect.height / displayScale)
             .intersection(CGRect(origin: .zero, size: image.size))
         return rect.isEmpty ? nil : rect
+    }
+
+    // MARK: - Zoom
+
+    private func pinchChanged(scale: CGFloat, centroid: CGPoint) {
+        pinchActive = true
+        let start = pinchStart ?? (zoom, displayOffset, centroid)
+        pinchStart = start
+        let newZoom = min(max(start.zoom * scale, 1), maxZoom)
+        // keep the image point under the pinch centroid pinned to it, so the
+        // gesture both zooms about the fingers and pans as they move
+        let k = newZoom / start.zoom
+        let offset = CGPoint(x: centroid.x - (start.centroid.x - start.offset.x) * k,
+                             y: centroid.y - (start.centroid.y - start.offset.y) * k)
+        zoom = newZoom
+        pan = clampedPan(forOffset: offset, zoom: newZoom)
+    }
+
+    private func pinchEnded() {
+        pinchActive = false
+        pinchStart = nil
+        if zoom == 1 { pan = .zero }
+    }
+
+    private func cancelActiveDrag() {
+        switch dragMode {
+        case .moving(let i, let original), .resizing(let i, _, let original):
+            rects[i] = original
+        case .drawing, nil:
+            break
+        }
+        draftRect = nil
+        dragMode = nil
+        dragStart = nil
+        dragCancelled = true
     }
 
     // MARK: - Edits
@@ -337,5 +432,93 @@ extension CGRect {
     init(from a: CGPoint, to b: CGPoint) {
         self.init(x: min(a.x, b.x), y: min(a.y, b.y),
                   width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
+}
+
+/// Invisible layer that reports two-finger pinches. The recognizer is
+/// attached to the window — not this view — so single-finger touches still
+/// reach the SwiftUI drag gesture; pinches whose centroid starts outside
+/// this view's bounds are ignored. Centroids are reported in this view's
+/// coordinate space, which matches the editor container.
+private struct PinchGestureLayer: UIViewRepresentable {
+    let onChanged: (CGFloat, CGPoint) -> Void  // (cumulative scale, centroid)
+    let onEnded: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> WindowObservingView {
+        let view = WindowObservingView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        context.coordinator.view = view
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            coordinator?.attach(to: window)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: WindowObservingView, context: Context) {
+        context.coordinator.onChanged = onChanged
+        context.coordinator.onEnded = onEnded
+    }
+
+    static func dismantleUIView(_ uiView: WindowObservingView, coordinator: Coordinator) {
+        coordinator.attach(to: nil)
+    }
+
+    final class WindowObservingView: UIView {
+        var onWindowChange: ((UIWindow?) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?(window)
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        weak var view: UIView?
+        var onChanged: ((CGFloat, CGPoint) -> Void)?
+        var onEnded: (() -> Void)?
+        private var recognizer: UIPinchGestureRecognizer?
+        private var tracking = false
+
+        func attach(to window: UIWindow?) {
+            if let recognizer {
+                recognizer.view?.removeGestureRecognizer(recognizer)
+                self.recognizer = nil
+            }
+            guard let window else { return }
+            let pinch = UIPinchGestureRecognizer(target: self,
+                                                 action: #selector(handlePinch))
+            pinch.cancelsTouchesInView = false
+            pinch.delegate = self
+            window.addGestureRecognizer(pinch)
+            recognizer = pinch
+        }
+
+        @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let view else { return }
+            switch gesture.state {
+            case .began:
+                tracking = view.bounds.contains(gesture.location(in: view))
+                fallthrough
+            case .changed:
+                if tracking {
+                    onChanged?(gesture.scale, gesture.location(in: view))
+                }
+            case .ended, .cancelled, .failed:
+                if tracking { onEnded?() }
+                tracking = false
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
     }
 }
