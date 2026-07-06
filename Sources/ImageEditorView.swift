@@ -154,6 +154,11 @@ struct ImageEditorView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(redoStack.isEmpty)
+                    Button { commit([]) } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(rects.isEmpty)
                     // stateful: prominent while candidates are on screen
                     if candidates.isEmpty {
                         Button { detectText() } label: {
