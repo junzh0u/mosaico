@@ -25,11 +25,43 @@ enum MosaicProcessor {
 
         // Tile size proportional to image dimension, never smaller than 8 px
         let tile = Float(max(max(input.extent.width, input.extent.height) * tileFraction, 8))
-        let center = CGPoint(x: input.extent.midX, y: input.extent.midY)
+
+        guard let filteredCG = filteredImage(for: cgImage, extent: input.extent,
+                                             style: style, tile: tile) else { return nil }
+        let pixellated = CIImage(cgImage: filteredCG)
+
+        var output = input
+        for pixelRect in pixelRects {
+            // UIKit rect (top-left origin) -> Core Image rect (bottom-left origin)
+            let ciRect = CGRect(x: pixelRect.minX,
+                                y: input.extent.height - pixelRect.maxY,
+                                width: pixelRect.width,
+                                height: pixelRect.height)
+            output = pixellated.cropped(to: ciRect).composited(over: output)
+        }
+
+        guard let outCG = context.createCGImage(output, from: input.extent) else { return nil }
+        return UIImage(cgImage: outCG)
+    }
+
+    /// The whole-image filter is the expensive part (crystallize especially)
+    /// and depends only on (source, style, tile) — cache its bitmap so
+    /// re-compositing while a box is dragged only crops and composites.
+    private static var filterCache: (source: CGImage, style: MosaicStyle,
+                                     tile: Float, result: CGImage)?
+
+    private static func filteredImage(for source: CGImage, extent: CGRect,
+                                      style: MosaicStyle, tile: Float) -> CGImage? {
+        if let cache = filterCache, cache.source === source,
+           cache.style == style, cache.tile == tile {
+            return cache.result
+        }
 
         // Clamp edges so border tiles don't average with transparency,
         // then crop the infinite-extent output back to the image bounds
+        let input = CIImage(cgImage: source)
         let clamped = input.clampedToExtent()
+        let center = CGPoint(x: extent.midX, y: extent.midY)
         let filtered: CIImage?
         switch style {
         case .square:
@@ -45,20 +77,10 @@ enum MosaicProcessor {
             filter.center = center
             filtered = filter.outputImage
         }
-        guard let pixellated = filtered?.cropped(to: input.extent) else { return nil }
-
-        var output = input
-        for pixelRect in pixelRects {
-            // UIKit rect (top-left origin) -> Core Image rect (bottom-left origin)
-            let ciRect = CGRect(x: pixelRect.minX,
-                                y: input.extent.height - pixelRect.maxY,
-                                width: pixelRect.width,
-                                height: pixelRect.height)
-            output = pixellated.cropped(to: ciRect).composited(over: output)
-        }
-
-        guard let outCG = context.createCGImage(output, from: input.extent) else { return nil }
-        return UIImage(cgImage: outCG)
+        guard let cropped = filtered?.cropped(to: extent),
+              let result = context.createCGImage(cropped, from: extent) else { return nil }
+        filterCache = (source, style, tile, result)
+        return result
     }
 
     static func save(_ image: UIImage, completion: @escaping (Bool) -> Void) {

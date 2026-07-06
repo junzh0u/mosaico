@@ -68,11 +68,13 @@ struct ImageEditorView: View {
                                 case .resizing(let i, let anchor, _):
                                     let p = clampToImage(imagePoint(fromView: value.location))
                                     rects[i] = CGRect(from: anchor, to: p)
+                                    rerender()
                                 case .moving(let i, let original):
                                     let scale = displayScale
                                     rects[i] = original.offsetBy(
                                         dx: (value.location.x - value.startLocation.x) / scale,
                                         dy: (value.location.y - value.startLocation.y) / scale)
+                                    rerender()
                                 case .drawing, nil:
                                     draftRect = CGRect(from: dragStart!, to: value.location)
                                 }
@@ -92,7 +94,10 @@ struct ImageEditorView: View {
                                     let tooSmall = changed.width * displayScale < minBoxSide
                                         || changed.height * displayScale < minBoxSide
                                     rects[i] = original  // commit() snapshots pre-edit state
-                                    guard changed != original, !tooSmall else { return }
+                                    guard changed != original, !tooSmall else {
+                                        rerender()  // clear the live preview
+                                        return
+                                    }
                                     var newRects = rects
                                     newRects[i] = changed
                                     commit(newRects)
@@ -351,6 +356,7 @@ struct ImageEditorView: View {
         switch dragMode {
         case .moving(let i, let original), .resizing(let i, _, let original):
             rects[i] = original
+            rerender()  // clear the live preview
         case .drawing, nil:
             break
         }
