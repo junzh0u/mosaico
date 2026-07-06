@@ -18,6 +18,8 @@ struct ImageEditorView: View {
     @State private var draftRect: CGRect?  // view coordinates, while drawing
     @State private var containerSize: CGSize = .zero
     @State private var saveMessage: String?
+    @State private var style: MosaicStyle = .square
+    @State private var tileFraction: CGFloat = 0.02
 
     private let maxUndoSteps = 50
     private let handleHitRadius: CGFloat = 22
@@ -83,22 +85,41 @@ struct ImageEditorView: View {
                     .onChange(of: geo.size) { containerSize = geo.size }
             }
 
-            HStack {
-                Button { undo() } label: {
-                    Image(systemName: "arrow.uturn.backward")
+            VStack(spacing: 12) {
+                HStack {
+                    Image(systemName: "circle.grid.2x2")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(value: $tileFraction, in: 0.008...0.08) { editing in
+                        if !editing { rerender() }
+                    }
+                    Image(systemName: "circle.grid.2x2")
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.bordered)
-                .disabled(undoStack.isEmpty)
-                Button { redo() } label: {
-                    Image(systemName: "arrow.uturn.forward")
+                Picker("Style", selection: $style) {
+                    ForEach(MosaicStyle.allCases) { style in
+                        Text(style.rawValue)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .disabled(redoStack.isEmpty)
-                Button("Save") { save() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(rects.isEmpty)
+                .pickerStyle(.segmented)
+                HStack {
+                    Button { undo() } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(undoStack.isEmpty)
+                    Button { redo() } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(redoStack.isEmpty)
+                    Button("Save") { save() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(rects.isEmpty)
+                }
             }
             .padding()
+            .onChange(of: style) { rerender() }
         }
         .alert(saveMessage ?? "", isPresented: Binding(
             get: { saveMessage != nil },
@@ -241,7 +262,9 @@ struct ImageEditorView: View {
     }
 
     private func rerender() {
-        rendered = MosaicProcessor.applyMosaics(to: image, in: rects)
+        rendered = MosaicProcessor.applyMosaics(to: image, in: rects,
+                                                style: style,
+                                                tileFraction: tileFraction)
     }
 
     private func save() {
