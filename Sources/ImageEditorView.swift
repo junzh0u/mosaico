@@ -20,6 +20,8 @@ struct ImageEditorView: View {
     @State private var saveMessage: String?
     @State private var style: MosaicStyle = .square
     @State private var tileFraction: CGFloat = 0.02
+    @State private var candidates: [CGRect] = []  // detected text, image pixel coords
+    @State private var detecting = false
 
     private let maxUndoSteps = 50
     private let handleHitRadius: CGFloat = 22
@@ -72,8 +74,19 @@ struct ImageEditorView: View {
                                     newRects[i] = changed
                                     commit(newRects)
                                 case .drawing, nil:
-                                    guard let draft = draftRect,
-                                          draft.width >= minBoxSide,
+                                    guard let draft = draftRect else { return }
+                                    if draft.width < minBoxSide, draft.height < minBoxSide {
+                                        // a tap: select a detected text candidate
+                                        if let tap = dragStart,
+                                           let idx = candidates.firstIndex(where: {
+                                               viewRect(from: $0).contains(tap)
+                                           }) {
+                                            let chosen = candidates.remove(at: idx)
+                                            commit(rects + [chosen])
+                                        }
+                                        return
+                                    }
+                                    guard draft.width >= minBoxSide,
                                           draft.height >= minBoxSide,
                                           let pixelRect = imagePixelRect(from: draft)
                                     else { return }
@@ -113,6 +126,23 @@ struct ImageEditorView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(redoStack.isEmpty)
+                    // stateful: prominent while candidates are on screen
+                    if candidates.isEmpty {
+                        Button { detectText() } label: {
+                            if detecting {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "text.viewfinder")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(detecting)
+                    } else {
+                        Button { detectText() } label: {
+                            Image(systemName: "text.viewfinder")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                     Button("Save") { save() }
                         .buttonStyle(.borderedProminent)
                         .disabled(rects.isEmpty)
@@ -142,6 +172,12 @@ struct ImageEditorView: View {
                     .frame(width: 12, height: 12)
                     .position(corner)
             }
+        }
+        ForEach(candidates.indices, id: \.self) { i in
+            let rect = viewRect(from: candidates[i])
+            Path { $0.addRect(rect) }.fill(.cyan.opacity(0.12))
+            Path { $0.addRect(rect) }
+                .stroke(.cyan, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
         }
         if let rect = draftRect {
             Path { $0.addRect(rect) }.fill(.yellow.opacity(0.2))
@@ -259,6 +295,27 @@ struct ImageEditorView: View {
         undoStack.append(rects)
         rects = next
         rerender()
+    }
+
+    /// Toggles smart text detection: shows recognized text regions as
+    /// dashed candidates; tapping one masks it.
+    private func detectText() {
+        if !candidates.isEmpty {
+            candidates = []
+            return
+        }
+        detecting = true
+        Task {
+            let boxes = await TextDetector.detectTextRects(in: image)
+            // skip regions already fully covered by an existing mosaic box
+            candidates = boxes.filter { box in
+                !rects.contains { $0.contains(box) }
+            }
+            detecting = false
+            if candidates.isEmpty {
+                saveMessage = "No text found in this photo"
+            }
+        }
     }
 
     private func rerender() {

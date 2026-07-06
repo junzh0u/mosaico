@@ -5,6 +5,7 @@ Hide the sensitive parts of a photo in seconds. Pick a picture, drag boxes over 
 ## Features
 
 - **Draw to mosaic** — drag a rectangle and the mosaic applies the moment you lift your finger
+- **Smart text detection** — one tap finds all text in the photo (on-device Vision, no network); tap the highlighted regions you want masked
 - **Live, editable boxes** — every box stays on screen: move it, resize it by its corner handles, or delete it with the × badge; the mosaic re-renders as you go
 - **Two styles** — Square (pixelate) or Polygon (crystallize), with an adjustable tile-size slider
 - **Undo / redo** — every edit is reversible
