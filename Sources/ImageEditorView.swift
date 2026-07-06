@@ -18,7 +18,7 @@ struct ImageEditorView: View {
     @State private var draftRect: CGRect?  // view coordinates, while drawing
     @State private var containerSize: CGSize = .zero
     @State private var saveMessage: String?
-    @State private var style: MosaicStyle = .square
+    @State private var style: MosaicStyle = .polygon
     @State private var tileFraction: CGFloat = 0.02
     @State private var candidates: [CGRect] = []  // detected text, image pixel coords
     @State private var detecting = false

@@ -17,7 +17,7 @@ enum MosaicProcessor {
     /// tile size as a fraction of the longest image dimension.
     static func applyMosaics(to image: UIImage,
                              in pixelRects: [CGRect],
-                             style: MosaicStyle = .square,
+                             style: MosaicStyle = .polygon,
                              tileFraction: CGFloat = 0.02) -> UIImage? {
         guard !pixelRects.isEmpty else { return image }
         guard let cgImage = image.cgImage else { return nil }
