@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct PictureMaskerApp: App {
+struct MosaicoApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
