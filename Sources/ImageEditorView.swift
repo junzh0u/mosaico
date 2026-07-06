@@ -71,9 +71,11 @@ struct ImageEditorView: View {
                                     rerender()
                                 case .moving(let i, let original):
                                     let scale = displayScale
+                                    let dx = (value.location.x - value.startLocation.x) / scale
+                                    let dy = (value.location.y - value.startLocation.y) / scale
                                     rects[i] = original.offsetBy(
-                                        dx: (value.location.x - value.startLocation.x) / scale,
-                                        dy: (value.location.y - value.startLocation.y) / scale)
+                                        dx: min(max(dx, -original.minX), image.size.width - original.maxX),
+                                        dy: min(max(dy, -original.minY), image.size.height - original.maxY))
                                     rerender()
                                 case .drawing, nil:
                                     draftRect = CGRect(from: dragStart!, to: value.location)
