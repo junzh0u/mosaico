@@ -3,18 +3,25 @@ import SwiftUI
 struct ImageEditorView: View {
     let image: UIImage  // normalized original, never mutated
 
+    private enum DragMode {
+        case drawing
+        case moving(index: Int, original: CGRect)
+        case resizing(index: Int, anchor: CGPoint, original: CGRect)
+    }
+
     @State private var rects: [CGRect] = []  // image pixel coordinates
     @State private var rendered: UIImage?
     @State private var undoStack: [[CGRect]] = []
     @State private var redoStack: [[CGRect]] = []
     @State private var dragStart: CGPoint?
+    @State private var dragMode: DragMode?
     @State private var draftRect: CGRect?  // view coordinates, while drawing
-    @State private var movingIndex: Int?
-    @State private var movingOriginal: CGRect?  // rect at move start, image space
     @State private var containerSize: CGSize = .zero
     @State private var saveMessage: String?
 
     private let maxUndoSteps = 50
+    private let handleHitRadius: CGFloat = 22
+    private let minBoxSide: CGFloat = 10  // view points
 
     var body: some View {
         VStack {
@@ -23,53 +30,51 @@ struct ImageEditorView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .overlay {
-                        ForEach(rects.indices, id: \.self) { i in
-                            let rect = viewRect(from: rects[i])
-                            Path { $0.addRect(rect) }.stroke(.yellow, lineWidth: 2)
-                        }
-                        if let rect = draftRect {
-                            Path { $0.addRect(rect) }.fill(.yellow.opacity(0.2))
-                            Path { $0.addRect(rect) }.stroke(.yellow, lineWidth: 2)
-                        }
-                    }
+                    .overlay { decorations.allowsHitTesting(false) }
+                    .overlay { removeButtons }
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
                                 if dragStart == nil {
                                     dragStart = value.startLocation
-                                    // Starting inside an existing box moves it
-                                    // (topmost first); otherwise draw a new one
-                                    movingIndex = rects.indices.reversed().first {
-                                        viewRect(from: rects[$0]).contains(value.startLocation)
-                                    }
-                                    movingOriginal = movingIndex.map { rects[$0] }
+                                    dragMode = hitTest(value.startLocation)
                                 }
-                                if let i = movingIndex, let original = movingOriginal {
+                                switch dragMode {
+                                case .resizing(let i, let anchor, _):
+                                    let p = clampToImage(imagePoint(fromView: value.location))
+                                    rects[i] = CGRect(from: anchor, to: p)
+                                case .moving(let i, let original):
                                     let scale = fitScale
                                     rects[i] = original.offsetBy(
                                         dx: (value.location.x - value.startLocation.x) / scale,
                                         dy: (value.location.y - value.startLocation.y) / scale)
-                                } else {
+                                case .drawing, nil:
                                     draftRect = CGRect(from: dragStart!, to: value.location)
                                 }
                             }
                             .onEnded { _ in
                                 defer {
                                     dragStart = nil
+                                    dragMode = nil
                                     draftRect = nil
-                                    movingIndex = nil
-                                    movingOriginal = nil
                                 }
-                                if let i = movingIndex, let original = movingOriginal {
-                                    let moved = rects[i]
-                                    guard moved != original else { return }
-                                    rects[i] = original  // commit() snapshots pre-move state
+                                switch dragMode {
+                                case .moving(let i, let original),
+                                     .resizing(let i, _, let original):
+                                    let changed = rects[i]
+                                    let tooSmall = changed.width * fitScale < minBoxSide
+                                        || changed.height * fitScale < minBoxSide
+                                    rects[i] = original  // commit() snapshots pre-edit state
+                                    guard changed != original, !tooSmall else { return }
                                     var newRects = rects
-                                    newRects[i] = moved
+                                    newRects[i] = changed
                                     commit(newRects)
-                                } else if let draft = draftRect,
-                                          let pixelRect = imagePixelRect(from: draft) {
+                                case .drawing, nil:
+                                    guard let draft = draftRect,
+                                          draft.width >= minBoxSide,
+                                          draft.height >= minBoxSide,
+                                          let pixelRect = imagePixelRect(from: draft)
+                                    else { return }
                                     commit(rects + [pixelRect])
                                 }
                             }
@@ -103,6 +108,67 @@ struct ImageEditorView: View {
         }
     }
 
+    // MARK: - Overlay content
+
+    @ViewBuilder private var decorations: some View {
+        ForEach(rects.indices, id: \.self) { i in
+            let rect = viewRect(from: rects[i])
+            Path { $0.addRect(rect) }.stroke(.yellow, lineWidth: 2)
+            ForEach(Array(corners(of: rect).enumerated()), id: \.offset) { _, corner in
+                Circle()
+                    .fill(.white)
+                    .overlay(Circle().stroke(.yellow, lineWidth: 2))
+                    .frame(width: 12, height: 12)
+                    .position(corner)
+            }
+        }
+        if let rect = draftRect {
+            Path { $0.addRect(rect) }.fill(.yellow.opacity(0.2))
+            Path { $0.addRect(rect) }.stroke(.yellow, lineWidth: 2)
+        }
+    }
+
+    @ViewBuilder private var removeButtons: some View {
+        ForEach(rects.indices, id: \.self) { i in
+            let rect = viewRect(from: rects[i])
+            Button { remove(i) } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 22))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, .black.opacity(0.6))
+            }
+            .position(x: rect.maxX + 16, y: rect.minY - 16)
+        }
+    }
+
+    // MARK: - Hit testing
+
+    private func corners(of rect: CGRect) -> [CGPoint] {
+        [CGPoint(x: rect.minX, y: rect.minY),
+         CGPoint(x: rect.maxX, y: rect.minY),
+         CGPoint(x: rect.minX, y: rect.maxY),
+         CGPoint(x: rect.maxX, y: rect.maxY)]
+    }
+
+    private func hitTest(_ point: CGPoint) -> DragMode {
+        // Corner handles first (topmost box wins), then box interiors
+        for i in rects.indices.reversed() {
+            let viewCorners = corners(of: viewRect(from: rects[i]))
+            for (j, corner) in viewCorners.enumerated()
+            where hypot(point.x - corner.x, point.y - corner.y) <= handleHitRadius {
+                let opposite = viewCorners[3 - j]
+                return .resizing(index: i,
+                                 anchor: clampToImage(imagePoint(fromView: opposite)),
+                                 original: rects[i])
+            }
+        }
+        for i in rects.indices.reversed()
+        where viewRect(from: rects[i]).contains(point) {
+            return .moving(index: i, original: rects[i])
+        }
+        return .drawing
+    }
+
     // MARK: - View <-> image coordinate mapping (aspect-fit letterboxing)
 
     /// Points per image pixel when aspect-fit into the container
@@ -121,6 +187,16 @@ struct ImageEditorView: View {
                y: pixelRect.minY * fitScale + fitOffset.y,
                width: pixelRect.width * fitScale,
                height: pixelRect.height * fitScale)
+    }
+
+    private func imagePoint(fromView p: CGPoint) -> CGPoint {
+        CGPoint(x: (p.x - fitOffset.x) / fitScale,
+                y: (p.y - fitOffset.y) / fitScale)
+    }
+
+    private func clampToImage(_ p: CGPoint) -> CGPoint {
+        CGPoint(x: min(max(p.x, 0), image.size.width),
+                y: min(max(p.y, 0), image.size.height))
     }
 
     private func imagePixelRect(from viewRect: CGRect) -> CGRect? {
@@ -142,6 +218,12 @@ struct ImageEditorView: View {
         redoStack.removeAll()
         rects = newRects
         rerender()
+    }
+
+    private func remove(_ i: Int) {
+        var newRects = rects
+        newRects.remove(at: i)
+        commit(newRects)
     }
 
     private func undo() {
