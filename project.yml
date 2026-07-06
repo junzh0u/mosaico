@@ -1,0 +1,21 @@
+name: PictureMasker
+options:
+  bundleIdPrefix: info.junz
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  PictureMasker:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Sources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSPhotoLibraryAddUsageDescription: "PictureMasker saves your masked photo back to your photo library."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: info.junz.picturemasker
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
