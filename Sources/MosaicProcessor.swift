@@ -4,9 +4,12 @@ import CoreImage.CIFilterBuiltins
 import Photos
 
 enum MosaicProcessor {
-    /// Pixellates the given rect (in image pixel coordinates, top-left origin)
-    /// and composites it over the original image.
-    static func applyMosaic(to image: UIImage, in pixelRect: CGRect) -> UIImage? {
+    private static let context = CIContext()
+
+    /// Pixellates the given rects (in image pixel coordinates, top-left
+    /// origin) and composites them over the original image.
+    static func applyMosaics(to image: UIImage, in pixelRects: [CGRect]) -> UIImage? {
+        guard !pixelRects.isEmpty else { return image }
         guard let cgImage = image.cgImage else { return nil }
         let input = CIImage(cgImage: cgImage)
 
@@ -19,15 +22,16 @@ enum MosaicProcessor {
         // CIPixellate has infinite extent — crop back to the image bounds
         guard let pixellated = filter.outputImage?.cropped(to: input.extent) else { return nil }
 
-        // UIKit rect (top-left origin) -> Core Image rect (bottom-left origin)
-        let ciRect = CGRect(x: pixelRect.minX,
-                            y: input.extent.height - pixelRect.maxY,
-                            width: pixelRect.width,
-                            height: pixelRect.height)
+        var output = input
+        for pixelRect in pixelRects {
+            // UIKit rect (top-left origin) -> Core Image rect (bottom-left origin)
+            let ciRect = CGRect(x: pixelRect.minX,
+                                y: input.extent.height - pixelRect.maxY,
+                                width: pixelRect.width,
+                                height: pixelRect.height)
+            output = pixellated.cropped(to: ciRect).composited(over: output)
+        }
 
-        let output = pixellated.cropped(to: ciRect).composited(over: input)
-
-        let context = CIContext()
         guard let outCG = context.createCGImage(output, from: input.extent) else { return nil }
         return UIImage(cgImage: outCG)
     }

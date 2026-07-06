@@ -10,13 +10,10 @@ struct ContentView: View {
         NavigationStack {
             Group {
                 if let image {
-                    ImageEditorView(image: Binding(
-                        get: { image },
-                        set: { self.image = $0 }
-                    ))
-                    // New identity per picked photo so editor state
-                    // (undo history, selection) starts fresh
-                    .id(photoID)
+                    ImageEditorView(image: image)
+                        // New identity per picked photo so editor state
+                        // (selection boxes, undo history) starts fresh
+                        .id(photoID)
                 } else {
                     ContentUnavailableView(
                         "No Photo",
