@@ -6,9 +6,10 @@ Hide the sensitive parts of a photo in seconds. Pick a picture, drag boxes over 
 
 - **Draw to mosaic** — drag a rectangle and the mosaic applies the moment you lift your finger
 - **Smart text detection** — one tap finds all text in the photo (on-device Vision, no network); tap the highlighted regions you want masked
-- **Live, editable boxes** — every box stays on screen: move it, resize it by its corner handles, or delete it with the × badge; the mosaic re-renders as you go
-- **Two styles** — Square (pixelate) or Polygon (crystallize), with an adjustable tile-size slider
-- **Undo / redo** — every edit is reversible
+- **Live, editable boxes** — every box stays on screen: move it, resize it by its corner handles, or delete it with the × badge; the mosaic re-renders live while you drag
+- **Pinch to zoom** — zoom up to 8× for precise masking; the same two-finger gesture pans, and boxes never leave the photo
+- **Two styles** — Polygon (crystallize, the default) or Square (pixelate), with an adjustable tile-size slider
+- **Undo / redo** — every edit is reversible, including the discard-all button
 - **Non-destructive** — edits render from the original at full resolution; saving adds a new photo and never modifies the original
 - **Private by design** — no photo-library read permission needed (the system picker shares only the photo you choose), add-only permission to save, no network access at all
 
