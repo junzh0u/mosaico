@@ -27,3 +27,6 @@ run-device: build-device
 
 clean:
     rm -rf build Mosaico.xcodeproj
+
+icon:
+    uv run --with numpy --with pillow --with matplotlib --with scipy scripts/make_icon.py
