@@ -6,6 +6,10 @@ struct ImageEditorView: View {
     @State private var selectionRect: CGRect?  // view coordinates
     @State private var containerSize: CGSize = .zero
     @State private var saveMessage: String?
+    @State private var undoStack: [UIImage] = []
+    @State private var redoStack: [UIImage] = []
+
+    private let maxUndoSteps = 10
 
     var body: some View {
         VStack {
@@ -34,6 +38,16 @@ struct ImageEditorView: View {
             }
 
             HStack {
+                Button { undo() } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .buttonStyle(.bordered)
+                .disabled(undoStack.isEmpty)
+                Button { redo() } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                }
+                .buttonStyle(.bordered)
+                .disabled(redoStack.isEmpty)
                 Button("Apply Mosaic") { applyMosaic() }
                     .buttonStyle(.borderedProminent)
                     .disabled(selectionRect == nil)
@@ -74,7 +88,26 @@ struct ImageEditorView: View {
               let pixelRect = imagePixelRect(from: viewRect),
               let result = MosaicProcessor.applyMosaic(to: image, in: pixelRect)
         else { return }
+        undoStack.append(image)
+        if undoStack.count > maxUndoSteps {
+            undoStack.removeFirst()
+        }
+        redoStack.removeAll()
         image = result
+        selectionRect = nil
+    }
+
+    private func undo() {
+        guard let previous = undoStack.popLast() else { return }
+        redoStack.append(image)
+        image = previous
+        selectionRect = nil
+    }
+
+    private func redo() {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(image)
+        image = next
         selectionRect = nil
     }
 

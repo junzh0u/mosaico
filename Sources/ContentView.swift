@@ -4,6 +4,7 @@ import PhotosUI
 struct ContentView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var image: UIImage?
+    @State private var photoID = UUID()
 
     var body: some View {
         NavigationStack {
@@ -13,6 +14,9 @@ struct ContentView: View {
                         get: { image },
                         set: { self.image = $0 }
                     ))
+                    // New identity per picked photo so editor state
+                    // (undo history, selection) starts fresh
+                    .id(photoID)
                 } else {
                     ContentUnavailableView(
                         "No Photo",
@@ -29,6 +33,7 @@ struct ContentView: View {
                     if let data = try? await pickerItem?.loadTransferable(type: Data.self),
                        let loaded = UIImage(data: data) {
                         image = loaded.normalized()
+                        photoID = UUID()
                     }
                 }
             }
