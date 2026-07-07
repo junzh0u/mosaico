@@ -14,6 +14,12 @@ Hide the sensitive parts of a photo in seconds. Pick a picture, drag boxes over 
 - **Non-destructive** — edits render from the original at full resolution; saving adds a new photo and never modifies the original
 - **Private by design** — no photo-library read permission needed (the system picker shares only the photo you choose), add-only permission to save, no network access at all
 
+## Support
+
+Found a bug or have a question? [Open an issue](https://github.com/junzh0u/mosaico/issues) or email [apple@junz.info](mailto:apple@junz.info).
+
+Mosaico collects no data whatsoever — see the [privacy policy](PRIVACY.md).
+
 ## Requirements
 
 - iOS 17+ (iPhone)
