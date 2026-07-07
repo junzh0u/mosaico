@@ -186,6 +186,13 @@ struct ImageEditorView: View {
                         }
                         .buttonStyle(.borderedProminent)
                     }
+                    ShareLink(item: SharablePhoto(image: rendered ?? image),
+                              preview: SharePreview("Mosaicked Photo",
+                                                    image: Image(uiImage: rendered ?? image))) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(rects.isEmpty)
                     Button("Save") { save() }
                         .buttonStyle(.borderedProminent)
                         .disabled(rects.isEmpty)
@@ -459,6 +466,18 @@ extension CGRect {
     init(from a: CGPoint, to b: CGPoint) {
         self.init(x: min(a.x, b.x), y: min(a.y, b.y),
                   width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
+}
+
+/// Shares the composite as JPEG — the default Image transferable exports
+/// PNG, which is tens of MB for a full-resolution photo.
+private struct SharablePhoto: Transferable {
+    let image: UIImage
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .jpeg) { photo in
+            photo.image.jpegData(compressionQuality: 0.9) ?? Data()
+        }
     }
 }
 

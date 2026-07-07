@@ -10,6 +10,7 @@ Hide the sensitive parts of a photo in seconds. Pick a picture, drag boxes over 
 - **Pinch to zoom** — zoom up to 8× for precise masking; the same two-finger gesture pans, and boxes never leave the photo
 - **Two styles** — Polygon (crystallize, the default) or Square (pixelate), with an adjustable tile-size slider
 - **Undo / redo** — every edit is reversible, including the discard-all button
+- **Save or share** — write the result to your library as a new photo, or send it straight to any app from the share sheet
 - **Non-destructive** — edits render from the original at full resolution; saving adds a new photo and never modifies the original
 - **Private by design** — no photo-library read permission needed (the system picker shares only the photo you choose), add-only permission to save, no network access at all
 
