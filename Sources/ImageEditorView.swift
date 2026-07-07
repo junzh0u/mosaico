@@ -7,6 +7,7 @@ struct ImageEditorView: View {
         case drawing
         case moving(index: Int, original: CGRect)
         case resizing(index: Int, anchor: CGPoint, original: CGRect)
+        case removing(index: Int)
     }
 
     @State private var rects: [CGRect] = []  // image pixel coordinates
@@ -46,7 +47,6 @@ struct ImageEditorView: View {
                 }
                     .frame(width: geo.size.width, height: geo.size.height)
                     .overlay { decorations.allowsHitTesting(false) }
-                    .overlay { removeButtons }
                     .clipped()
                     .contentShape(Rectangle())
                     .background {
@@ -77,11 +77,13 @@ struct ImageEditorView: View {
                                         dx: min(max(dx, -original.minX), image.size.width - original.maxX),
                                         dy: min(max(dy, -original.minY), image.size.height - original.maxY))
                                     rerender()
+                                case .removing:
+                                    break
                                 case .drawing, nil:
                                     draftRect = CGRect(from: dragStart!, to: value.location)
                                 }
                             }
-                            .onEnded { _ in
+                            .onEnded { value in
                                 defer {
                                     dragStart = nil
                                     dragMode = nil
@@ -103,6 +105,12 @@ struct ImageEditorView: View {
                                     var newRects = rects
                                     newRects[i] = changed
                                     commit(newRects)
+                                case .removing(let i):
+                                    // only if it stayed a tap, not a drag away
+                                    if hypot(value.translation.width,
+                                             value.translation.height) < minBoxSide {
+                                        remove(i)
+                                    }
                                 case .drawing, nil:
                                     guard let draft = draftRect else { return }
                                     if draft.width < minBoxSide, draft.height < minBoxSide {
@@ -207,6 +215,13 @@ struct ImageEditorView: View {
                     .frame(width: 12, height: 12)
                     .position(corner)
             }
+            // visual only — removal is a tap handled by hitTest, so the
+            // corner handle keeps priority over the badge
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 22))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, .black.opacity(0.6))
+                .position(badgeCenter(for: rect))
         }
         ForEach(candidates.indices, id: \.self) { i in
             let rect = viewRect(from: candidates[i])
@@ -220,25 +235,11 @@ struct ImageEditorView: View {
         }
     }
 
-    @ViewBuilder private var removeButtons: some View {
-        ForEach(rects.indices, id: \.self) { i in
-            let rect = viewRect(from: rects[i])
-            let position = CGPoint(x: rect.maxX + 16, y: rect.minY - 16)
-            // .clipped() hides but doesn't disable overflowing views — skip
-            // badges panned off screen so they can't be tapped invisibly
-            if CGRect(origin: .zero, size: containerSize).contains(position) {
-                Button { remove(i) } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .black.opacity(0.6))
-                }
-                .position(position)
-            }
-        }
-    }
-
     // MARK: - Hit testing
+
+    private func badgeCenter(for viewRect: CGRect) -> CGPoint {
+        CGPoint(x: viewRect.maxX + 16, y: viewRect.minY - 16)
+    }
 
     private func corners(of rect: CGRect) -> [CGPoint] {
         [CGPoint(x: rect.minX, y: rect.minY),
@@ -248,7 +249,8 @@ struct ImageEditorView: View {
     }
 
     private func hitTest(_ point: CGPoint) -> DragMode {
-        // Corner handles first (topmost box wins), then box interiors
+        // Corner handles first (topmost box wins), then ×-badges, then box
+        // interiors — so the badge can never steal the top-right handle
         for i in rects.indices.reversed() {
             let viewCorners = corners(of: viewRect(from: rects[i]))
             for (j, corner) in viewCorners.enumerated()
@@ -257,6 +259,12 @@ struct ImageEditorView: View {
                 return .resizing(index: i,
                                  anchor: clampToImage(imagePoint(fromView: opposite)),
                                  original: rects[i])
+            }
+        }
+        for i in rects.indices.reversed() {
+            let badge = badgeCenter(for: viewRect(from: rects[i]))
+            if hypot(point.x - badge.x, point.y - badge.y) <= 20 {
+                return .removing(index: i)
             }
         }
         for i in rects.indices.reversed()
@@ -370,7 +378,7 @@ struct ImageEditorView: View {
         case .moving(let i, let original), .resizing(let i, _, let original):
             rects[i] = original
             rerender()  // clear the live preview
-        case .drawing, nil:
+        case .drawing, .removing, nil:
             break
         }
         draftRect = nil
