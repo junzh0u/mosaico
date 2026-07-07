@@ -341,6 +341,12 @@ struct ImageEditorView: View {
 
     private func pinchChanged(scale: CGFloat, centroid: CGPoint) {
         pinchActive = true
+        // Cancel any in-progress drag here, not just in the drag's onChanged:
+        // if the drag gets no further events, its onEnded would commit the
+        // draft as a new box
+        if dragStart != nil || dragMode != nil || draftRect != nil {
+            cancelActiveDrag()
+        }
         let start = pinchStart ?? (zoom, displayOffset, centroid)
         pinchStart = start
         let newZoom = min(max(start.zoom * scale, 1), maxZoom)
