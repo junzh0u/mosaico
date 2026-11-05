@@ -27,7 +27,8 @@ struct ImageEditorView: View {
     @State private var pan: CGSize = .zero
     @State private var pinchActive = false
     @State private var pinchStart: (zoom: CGFloat, offset: CGPoint, centroid: CGPoint)?
-    @State private var dragCancelled = false  // a pinch interrupted this drag
+    @GestureState private var dragActive = false
+    @State private var dragCancelled = false
 
     private let maxUndoSteps = 50
     private let handleHitRadius: CGFloat = 22
@@ -54,12 +55,13 @@ struct ImageEditorView: View {
                     }
                     .gesture(
                         DragGesture(minimumDistance: 0)
+                            .updating($dragActive) { _, active, _ in active = true }
                             .onChanged { value in
                                 if pinchActive {
                                     cancelActiveDrag()
                                     return
                                 }
-                                if dragCancelled { return }
+                                guard !dragCancelled, displayScale > 0 else { return }
                                 if dragStart == nil {
                                     dragStart = value.startLocation
                                     dragMode = hitTest(value.startLocation)
@@ -133,7 +135,14 @@ struct ImageEditorView: View {
                             }
                     )
                     .onAppear { containerSize = geo.size }
-                    .onChange(of: geo.size) { containerSize = geo.size }
+                    .onChange(of: geo.size) { resizeCanvas(to: geo.size) }
+                    .onChange(of: dragActive) {
+                        if !dragActive {
+                            // A system interruption can end a gesture without onEnded.
+                            if dragMode != nil { cancelActiveDrag() }
+                            dragCancelled = false
+                        }
+                    }
             }
 
             VStack(spacing: 12) {
@@ -153,49 +162,15 @@ struct ImageEditorView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                HStack {
-                    Button { undo() } label: {
-                        Image(systemName: "arrow.uturn.backward")
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        editActions
+                        outputActions
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(undoStack.isEmpty)
-                    Button { redo() } label: {
-                        Image(systemName: "arrow.uturn.forward")
+                    VStack {
+                        HStack { editActions }
+                        HStack { outputActions }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(redoStack.isEmpty)
-                    Button { commit([]) } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(rects.isEmpty)
-                    // stateful: prominent while candidates are on screen
-                    if candidates.isEmpty {
-                        Button { detectText() } label: {
-                            if detecting {
-                                ProgressView()
-                            } else {
-                                Image(systemName: "text.viewfinder")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(detecting)
-                    } else {
-                        Button { detectText() } label: {
-                            Image(systemName: "text.viewfinder")
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    ShareLink(item: SharablePhoto(image: rendered ?? image),
-                              preview: SharePreview("Mosaicked Photo",
-                                                    image: Image(uiImage: rendered ?? image))) {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(rects.isEmpty)
-                    Button("Save") { save() }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(rects.isEmpty)
                 }
             }
             .padding()
@@ -206,6 +181,58 @@ struct ImageEditorView: View {
             set: { if !$0 { saveMessage = nil } }
         )) {
             Button("OK") {}
+        }
+    }
+
+    private var editActions: some View {
+        Group {
+            Button { undo() } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .buttonStyle(.bordered)
+            .disabled(undoStack.isEmpty)
+            Button { redo() } label: {
+                Image(systemName: "arrow.uturn.forward")
+            }
+            .buttonStyle(.bordered)
+            .disabled(redoStack.isEmpty)
+            Button { commit([]) } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.bordered)
+            .disabled(rects.isEmpty)
+            // stateful: prominent while candidates are on screen
+            if candidates.isEmpty {
+                Button { detectText() } label: {
+                    if detecting {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "text.viewfinder")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(detecting)
+            } else {
+                Button { detectText() } label: {
+                    Image(systemName: "text.viewfinder")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var outputActions: some View {
+        Group {
+            ShareLink(item: SharablePhoto(image: rendered ?? image),
+                      preview: SharePreview("Mosaicked Photo",
+                                            image: Image(uiImage: rendered ?? image))) {
+                Image(systemName: "square.and.arrow.up")
+            }
+            .buttonStyle(.bordered)
+            .disabled(rects.isEmpty)
+            Button("Save") { save() }
+                .buttonStyle(.borderedProminent)
+                .disabled(rects.isEmpty)
         }
     }
 
@@ -354,7 +381,25 @@ struct ImageEditorView: View {
 
     // MARK: - Zoom
 
+    private func resizeCanvas(to size: CGSize) {
+        if dragMode != nil { cancelActiveDrag() }
+
+        // Keep the same image point centered where the new bounds allow it.
+        let center = displayScale > 0
+            ? imagePoint(fromView: CGPoint(x: containerSize.width / 2, y: containerSize.height / 2))
+            : CGPoint(x: image.size.width / 2, y: image.size.height / 2)
+        containerSize = size
+        pan = clampedPan(
+            forOffset: CGPoint(x: size.width / 2 - center.x * displayScale,
+                               y: size.height / 2 - center.y * displayScale),
+            zoom: zoom
+        )
+        // An active pinch belongs to the old viewport. Ignore it until it ends.
+        pinchStart = nil
+    }
+
     private func pinchChanged(scale: CGFloat, centroid: CGPoint) {
+        guard !pinchActive || pinchStart != nil, displayScale > 0 else { return }
         pinchActive = true
         // Cancel any in-progress drag here, not just in the drag's onChanged:
         // if the drag gets no further events, its onEnded would commit the

@@ -12,6 +12,10 @@ targets:
       path: Sources/Info.plist
       properties:
         UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         NSPhotoLibraryAddUsageDescription: "Your edited photo is saved to your library as a new photo — the original is never touched."
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"

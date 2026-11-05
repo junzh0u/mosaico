@@ -38,6 +38,14 @@ just icon         # regenerate the app icon (scripts/make_icon.py)
 just clean        # remove build products and the generated project
 ```
 
+### Running on the iPhone Duo simulator
+
+Use Xcode 27.1 or later with an iOS simulator runtime and an iPhone Duo simulator configured.
+
+```sh
+MOSAICO_SIMULATOR='iPhone Duo' just run
+```
+
 ### Running on your iPhone
 
 One-time setup: add your (free) Apple ID in Xcode → Settings → Accounts, put your Team ID in `DEVELOPMENT_TEAM` in `project.yml`, enable Developer Mode on the phone, then `just run-device`. With free-tier signing the app's signature expires after 7 days — just run it again to refresh.

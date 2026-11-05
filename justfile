@@ -1,4 +1,4 @@
-sim := "iPhone 17"
+sim := env_var_or_default("MOSAICO_SIMULATOR", "iPhone 17")
 bundle_id := "info.junz.mosaico"
 
 generate:
